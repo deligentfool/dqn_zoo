@@ -104,7 +104,7 @@ if __name__ == '__main__':
     epsilon_min = 0.01
     decay = 0.99
     episode = 1000000
-    render = True
+    render = False
 
     env = gym.make('CartPole-v0')
     env = env.unwrapped
