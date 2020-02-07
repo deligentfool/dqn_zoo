@@ -6,42 +6,6 @@ import random
 import gym
 from collections import deque
 
-class n_step_replay_buffer(object):
-    def __init__(self, capacity, n_step, gamma):
-        self.capacity = capacity
-        self.n_step = n_step
-        self.gamma = gamma
-        self.memory = deque(maxlen=self.capacity)
-        self.n_step_buffer = deque(maxlen=self.n_step)
-
-    def get_n_step_info(self):
-        observation, action = self.n_step_buffer[0][: 2]
-        reward, next_observation, done = self.n_step_buffer[-1][-3:]
-        for _, _, rew, next_obs, do in reversed(list(self.n_step_buffer)[: -1]):
-            reward = self.gamma * reward * (1 - do) + rew
-            next_observation, done = (next_obs, do) if do else (next_observation, done)
-        return observation, action, reward, next_observation, done
-
-    def store(self, observation, action, reward, next_observation, done):
-        observation = np.expand_dims(observation, 0)
-        next_observation = np.expand_dims(next_observation, 0)
-
-        self.n_step_buffer.append([observation, action, reward, next_observation, done])
-        if len(self.n_step_buffer) < self.n_step:
-            return
-
-        observation, action, reward, next_observation, done = self.get_n_step_info()
-        self.memory.append([observation, action, reward, next_observation, done])
-
-    def sample(self, batch_size):
-        batch = random.sample(self.memory, batch_size)
-        observation, action, reward, next_observation, done = zip(* batch)
-
-        return np.concatenate(observation, 0), action, reward, np.concatenate(next_observation, 0), done
-
-    def __len__(self):
-        return len(self.memory)
-
 
 class replay_buffer(object):
     def __init__(self, capacity):
@@ -69,20 +33,24 @@ class qr_dqn(nn.Module):
         self.action_dim = action_dim
         self.quant_num = quant_num
 
-        self.fc1 = nn.Linear(self.observation_dim, 128)
-        self.fc2 = nn.Linear(128, 512)
-        self.fc3 = nn.Linear(512, self.action_dim * self.quant_num)
+        self.fc1 = nn.Linear(self.observation_dim, 32)
+        self.fc2 = nn.Linear(32, 64)
+        self.fc3 = nn.Linear(64, 128)
+        self.fc4 = nn.Linear(128, self.action_dim * self.quant_num)
 
     def forward(self, observation):
+        batch_size = observation.size(0)
         x = F.relu(self.fc1(observation))
         x = F.relu(self.fc2(x))
-        x = self.fc3(x)
+        x = F.relu(self.fc3(x))
+        x = self.fc4(x)
+        x = x.view(batch_size, self.action_dim, self.quant_num)
         return x
 
     def act(self, observation, epsilon):
         if random.random() > epsilon:
             dist = self.forward(observation)
-            action = dist.view(-1, self.action_dim, self.quant_num).mean(2).max(1)[1].detach().item()
+            action = dist.mean(2).max(1)[1].detach()[0].item()
         else:
             action = random.choice(list(range(self.action_dim)))
         return action
@@ -92,10 +60,9 @@ def get_target_distribution(target_model, next_observation, reward, done, gamma,
     batch_size = next_observation.size(0)
 
     next_dist = target_model.forward(next_observation).detach()
-    next_dist = next_dist.view(-1, action_dim, quant_num)
     next_action = next_dist.mean(2).max(1)[1].detach()
     next_action = next_action.unsqueeze(1).unsqueeze(1).expand(batch_size, 1, quant_num)
-    next_dist = next_dist.gather(1, next_action).unsqueeze(1)
+    next_dist = next_dist.gather(1, next_action).squeeze(1)
 
     reward = reward.unsqueeze(1).expand(batch_size, quant_num)
     done = done.unsqueeze(1).expand(batch_size, quant_num)
@@ -103,6 +70,7 @@ def get_target_distribution(target_model, next_observation, reward, done, gamma,
     target_dist.detach_()
 
     quant_idx = torch.sort(next_dist, 1, descending=False)[1]
+    # Midpoint quantile targets need to sort
     tau_hat = torch.linspace(0.0, 1.0 - 1. / quant_num, quant_num) + 0.5 / quant_num
     tau_hat = tau_hat.unsqueeze(0).expand(batch_size, quant_num)
     batch_idx = np.arange(batch_size)
@@ -120,9 +88,8 @@ def train(eval_model, target_model, buffer, optimizer, gamma, action_dim, quant_
     done = torch.FloatTensor(done)
 
     dist = eval_model.forward(observation)
-    dist = dist.view(-1, action_dim, quant_num)
     action = action.unsqueeze(1).unsqueeze(1).expand(batch_size, 1, quant_num)
-    dist = dist.gather(1, action).unsqueeze(1)
+    dist = dist.gather(1, action).squeeze(1)
     target_dist, tau = get_target_distribution(target_model, next_observation, reward, done, gamma, action_dim, quant_num)
 
     u = target_dist - dist
@@ -161,7 +128,6 @@ if __name__ == '__main__':
     env = env.unwrapped
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
-    #buffer = n_step_replay_buffer(capacity, n_step, gamma)
     buffer = replay_buffer(capacity)
     eval_net = qr_dqn(observation_dim, action_dim, quant_num)
     target_net = qr_dqn(observation_dim, action_dim, quant_num)
