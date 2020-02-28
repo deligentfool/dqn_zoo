@@ -166,6 +166,7 @@ def train(eval_model, target_model, buffer, v_min, v_max, atoms_num, gamma, batc
     action = action.unsqueeze(1).unsqueeze(1).expand(batch_size, 1, atoms_num)
     dist = dist.gather(1, action).squeeze(1)
     dist.detach().clamp_(0.01, 0.99)
+    # * make KL divergence as the loss
     loss = - (proj_dist * dist.log()).sum(1).mean()
 
     optimizer.zero_grad()
