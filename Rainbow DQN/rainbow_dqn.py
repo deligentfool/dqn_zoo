@@ -170,7 +170,7 @@ def projection_distribution(target_model, next_observation, reward, done, v_min,
     proj_dist = torch.zeros_like(next_dist, dtype=torch.float32)
     proj_dist.view(-1).index_add_(0, (offset + l).view(-1), (next_dist * (u.float() - b)).view(-1))
     proj_dist.view(-1).index_add_(0, (offset + l).view(-1), (next_dist * (b - l.float())).view(-1))
-    return proj_dist
+    return proj_dist.detach()
 
 
 def train(eval_model, target_model, buffer, v_min, v_max, atoms_num, gamma, batch_size, optimizer, count, update_freq):

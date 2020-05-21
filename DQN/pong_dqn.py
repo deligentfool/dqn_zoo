@@ -4,6 +4,8 @@ import torch.nn.functional as F
 import numpy as np
 from collections import deque
 import random
+import sys
+sys.path.append('.')
 from common.wrappers import make_atari, wrap_deepmind, wrap_pytorch
 import math
 

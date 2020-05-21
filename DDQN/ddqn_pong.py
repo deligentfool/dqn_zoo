@@ -3,9 +3,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import random
+import sys
+sys.path.append('.')
 from collections import deque
 from common.wrappers import make_atari, wrap_deepmind, wrap_pytorch
 import math
+
 
 class replay_buffer(object):
     def __init__(self, capacity):
@@ -81,7 +84,7 @@ def train(buffer, target_model, eval_model, gamma, optimizer, batch_size, loss_f
     argmax_actions = eval_model.forward(next_observation).max(1)[1].detach()
     next_q_value = next_q_values.gather(1, argmax_actions.unsqueeze(1)).squeeze(1)
     q_value = q_values.gather(1, action.unsqueeze(1)).squeeze(1)
-    expected_q_value = reward + gamma * (1 - done) * next_q_value
+    expected_q_value = (reward + gamma * (1 - done) * next_q_value).detach()
 
     loss = loss_fn(q_value, expected_q_value)
 

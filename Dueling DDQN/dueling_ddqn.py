@@ -66,7 +66,7 @@ def train(buffer, target_model, eval_model, gamma, optimizer, batch_size, loss_f
     next_q_values = target_model.forward(next_observation)
     next_q_value = next_q_values.max(1)[0].detach()
     q_value = q_values.gather(1, action.unsqueeze(1)).squeeze(1)
-    expected_q_value = reward + gamma * (1 - done) * next_q_value
+    expected_q_value = (reward + gamma * (1 - done) * next_q_value).detach()
 
     loss = loss_fn(q_value, expected_q_value)
 
@@ -83,7 +83,7 @@ if __name__ == '__main__':
     batch_size = 64
     soft_update_freq = 100
     capacity = 10000
-    exploration = 5000
+    exploration = 50
     epsilon_init = 0.9
     epsilon_min = 0.05
     decay = 0.99

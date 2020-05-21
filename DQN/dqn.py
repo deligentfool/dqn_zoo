@@ -68,7 +68,7 @@ def training(buffer, batch_size, model, optimizer, gamma, loss_fn):
     next_q_value = next_q_values.max(1)[0].detach()
     expected_q_value = reward + next_q_value * (1 - done) * gamma
 
-    loss = loss_fn(q_value, expected_q_value)
+    loss = loss_fn(q_value, expected_q_value.detach())
 
     optimizer.zero_grad()
     loss.backward()

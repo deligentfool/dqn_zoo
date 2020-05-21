@@ -179,7 +179,7 @@ if __name__ == '__main__':
     update_freq = 1000
     batch_size = 64
     episode = 1000000
-    render = True
+    render = False
     learning_rate = 1e-3
     gamma = 0.99
     alpha = 0.6

@@ -102,7 +102,7 @@ def train(buffer, target_model, eval_model, gamma, optimizer, batch_size, loss_f
     expected_q_value = reward + gamma * (1 - done) * next_q_value
     expected_q_value = expected_q_value.detach()
 
-    loss = (next_q_value - q_value).pow(2) * weights
+    loss = (expected_q_value - q_value).pow(2) * weights
     priorities = torch.abs(next_q_value - q_value).detach().numpy()
     buffer.update_priorities(indices, priorities)
     loss = loss.mean()
@@ -128,7 +128,7 @@ if __name__ == '__main__':
     alpha = 0.6
     beta = 0.4
     beta_increment_step = 1000
-    render = True
+    render = False
 
     env = gym.make('CartPole-v0')
     env = env.unwrapped
