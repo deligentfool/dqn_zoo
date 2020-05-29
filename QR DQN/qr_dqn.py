@@ -119,7 +119,6 @@ if __name__ == '__main__':
     episode = 1000000
     quant_num = 10
     update_freq = 200
-    n_step = 1
     batch_size = 64
     k = 1.
     render = False

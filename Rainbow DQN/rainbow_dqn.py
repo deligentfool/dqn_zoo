@@ -27,7 +27,7 @@ class n_step_replay_buffer(object):
 
     def store(self, observation, action, reward, next_observation, done):
         observation = np.expand_dims(observation, 0)
-        next_observation = np.expand_dims(observation, 0)
+        next_observation = np.expand_dims(next_observation, 0)
 
         self.n_step_buffer.append([observation, action, reward, next_observation, done])
         if len(self.n_step_buffer) < self.n_step:
@@ -216,7 +216,7 @@ if __name__ == '__main__':
     batch_size = 64
     capacity = 10000
     exploration = 200
-    n_step = 4
+    n_step = 2
     render = False
 
     env = gym.make('CartPole-v0')

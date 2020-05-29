@@ -64,11 +64,12 @@ def train(buffer, target_model, eval_model, gamma, optimizer, batch_size, loss_f
 
     q_values = eval_model.forward(observation)
     next_q_values = target_model.forward(next_observation)
-    next_q_value = next_q_values.max(1)[0].detach()
+    argmax_actions = eval_model.forward(next_observation).max(1)[1].detach()
+    next_q_value = next_q_values.gather(1, argmax_actions.unsqueeze(1)).squeeze(1)
     q_value = q_values.gather(1, action.unsqueeze(1)).squeeze(1)
-    expected_q_value = (reward + gamma * (1 - done) * next_q_value).detach()
+    expected_q_value = reward + gamma * (1 - done) * next_q_value
 
-    loss = loss_fn(q_value, expected_q_value)
+    loss = loss_fn(q_value, expected_q_value.detach())
 
     optimizer.zero_grad()
     loss.backward()
@@ -88,7 +89,7 @@ if __name__ == '__main__':
     epsilon_min = 0.05
     decay = 0.99
     episode = 1000000
-    render = True
+    render = False
 
     env = gym.make('CartPole-v0')
     env = env.unwrapped
