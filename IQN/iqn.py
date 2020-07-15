@@ -39,7 +39,7 @@ class net(nn.Module):
         self.feature_fc2 = nn.Linear(128, 128)
 
         self.phi = nn.Linear(1, 128, bias=False)
-        self.phi_bias = nn.Parameter(torch.zeros(128))
+        self.phi_bias = nn.Parameter(torch.zeros(128), requires_grad=True)
 
         self.fc1 = nn.Linear(128, 128)
         self.fc2 = nn.Linear(128, self.action_dim)
@@ -177,9 +177,10 @@ class iqn(object):
                 self.buffer.store(obs, action, reward, next_obs, done)
                 obs = next_obs
 
+                if self.count > self.exploration:
+                    self.train()
+
                 if done:
-                    if self.count > self.exploration:
-                        self.train()
                     if not self.weight_reward:
                         self.weight_reward = total_reward
                     else:
@@ -204,7 +205,7 @@ if __name__ == '__main__':
                learning_rate=1e-3,
                quant_num=64,
                epsilon_init=1.,
-               decay=500,
+               decay=5000,
                epsilon_min=0.01,
                update_freq=200,
                render=False,
