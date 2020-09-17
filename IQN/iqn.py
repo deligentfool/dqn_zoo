@@ -29,11 +29,10 @@ class replay_buffer(object):
 
 
 class net(nn.Module):
-    def __init__(self, observation_dim, action_dim, quant_num):
+    def __init__(self, observation_dim, action_dim):
         super(net, self).__init__()
         self.observation_dim = observation_dim
         self.action_dim = action_dim
-        self.quant_num = quant_num
 
         self.feature_fc1 = nn.Linear(self.observation_dim, 128)
         self.feature_fc2 = nn.Linear(128, 128)
@@ -44,43 +43,39 @@ class net(nn.Module):
         self.fc1 = nn.Linear(128, 128)
         self.fc2 = nn.Linear(128, self.action_dim)
 
-    def forward(self, observation):
+    def forward(self, observation, sample_num):
         x = F.relu(self.feature_fc1(observation))
         x = F.relu(self.feature_fc2(x))
 
-        tau = torch.rand(self.quant_num, 1)
+        tau = torch.rand(sample_num, 1)
         # * tau is the quantile vector
-        quants = torch.arange(0, self.quant_num, 1.0)
+        quants = torch.arange(0, sample_num, 1.0)
 
         cos_trans = torch.cos(quants * tau * np.pi).unsqueeze(2)
-        # * cos_trans: [quant_num, quant_num, 1]
+        # * cos_trans: [sample_num, sample_num, 1]
         rand_feat = F.relu(self.phi(cos_trans).mean(1) + self.phi_bias.unsqueeze(0)).unsqueeze(0)
-        # * rand_feat: [batch_size, quant_num, 128]
+        # * rand_feat: [batch_size, sample_num, 128]
         x = x.unsqueeze(1)
         # * x: [batch_size, 1, 128]
         x = x * rand_feat
-        # * x: [batch_size, quant_num, 128]
+        # * x: [batch_size, sample_num, 128]
         x = F.relu(self.fc1(x))
-        # * x: [batch_size, quant_num, 128]
+        # * x: [batch_size, sample_num, 128]
         value = self.fc2(x).transpose(1, 2)
-        # * value: [batch_size, action_dim, quant_num]
-        tau = tau.squeeze().unsqueeze(0).expand(value.size(0), self.quant_num)
+        # * value: [batch_size, action_dim, sample_num]
         return value, tau
 
     def act(self, observation, k_sample, epsilon):
         if random.random() > epsilon:
-            total_value = 0
-            for _ in range(k_sample):
-                value, tau = self.forward(observation)
-                total_value += value
+            value, tau = self.forward(observation, k_sample)
             # * beta is set to be an identity mapping here so calculate the expectation
-            action = total_value.mean(2).max(1)[1].detach().item()
+            action = value.mean(2).max(1)[1].detach().item()
         else:
             action = random.choice(list(range(self.action_dim)))
         return action
 
 class iqn(object):
-    def __init__(self, env, capacity, episode, exploration, k_sample, k, n, n_prime, gamma, batch_size, learning_rate, quant_num, epsilon_init, decay, epsilon_min, update_freq, render, log):
+    def __init__(self, env, capacity, episode, exploration, k_sample, k, n, n_prime, gamma, batch_size, learning_rate, epsilon_init, decay, epsilon_min, update_freq, render, log):
         # * n, n_prime, k_sample is N, N', K in the paper
         self.env = env
         self.capacity = capacity
@@ -93,7 +88,6 @@ class iqn(object):
         self.gamma = gamma
         self.batch_size = batch_size
         self.learning_rate = learning_rate
-        self.quant_num = quant_num
         self.epsilon_init = epsilon_init
         self.decay = decay
         self.epsilon_min = epsilon_min
@@ -103,8 +97,8 @@ class iqn(object):
 
         self.observation_dim = self.env.observation_space.shape[0]
         self.action_dim = self.env.action_space.n
-        self.net = net(self.observation_dim, self.action_dim, self.quant_num)
-        self.target_net = net(self.observation_dim, self.action_dim, self.quant_num)
+        self.net = net(self.observation_dim, self.action_dim)
+        self.target_net = net(self.observation_dim, self.action_dim)
         self.target_net.load_state_dict(self.net.state_dict())
         self.buffer = replay_buffer(self.capacity)
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=self.learning_rate)
@@ -113,17 +107,13 @@ class iqn(object):
         self.count = 0
         self.weight_reward = None
 
-    def computer_loss(self, taus, values, target_values):
+    def computer_loss(self, tau, value, target_value):
         # * get the quantile huber loss
-        loss = 0
-        for value, tau in zip(values, taus):
-            for target_value in target_values:
-                u = target_value - value
-
-                huber_loss = 0.5 * u.abs().clamp(min=0., max=self.k).pow(2)
-                huber_loss = huber_loss + self.k * (u.abs() - u.abs().clamp(min=0., max=self.k) - 0.5 * self.k)
-                quantile_loss = (tau - (u < 0).float()).abs() * huber_loss
-                loss += quantile_loss.sum() / self.batch_size
+        u = target_value.unsqueeze(1) - value.unsqueeze(-1)
+        huber_loss = 0.5 * u.abs().clamp(min=0., max=self.k).pow(2)
+        huber_loss = huber_loss + self.k * (u.abs() - u.abs().clamp(min=0., max=self.k) - 0.5 * self.k)
+        quantile_loss = (tau.unsqueeze(0) - (u < 0).float()).abs() * huber_loss
+        loss = quantile_loss.mean()
         return loss
 
     def train(self):
@@ -131,28 +121,20 @@ class iqn(object):
 
         observations = torch.FloatTensor(observations)
         actions = torch.LongTensor(actions)
-        rewards = torch.FloatTensor(rewards).unsqueeze(1).expand(self.batch_size, self.quant_num)
+        rewards = torch.FloatTensor(rewards).unsqueeze(1).expand(self.batch_size, self.n_prime)
         next_observations = torch.FloatTensor(next_observations)
-        dones = torch.FloatTensor(dones).unsqueeze(1).expand(self.batch_size, self.quant_num)
+        dones = torch.FloatTensor(dones).unsqueeze(1).expand(self.batch_size, self.n_prime)
 
-        values = []
-        taus = []
-        for _ in range(self.n):
-            dist, tau = self.net.forward(observations)
-            value = dist.gather(1, actions.unsqueeze(1).unsqueeze(2).expand(self.batch_size, 1, self.quant_num)).squeeze()
-            values.append(value)
-            taus.append(tau)
+        dist, tau = self.net.forward(observations, self.n)
+        value = dist.gather(1, actions.unsqueeze(1).unsqueeze(2).expand(self.batch_size, 1, self.n)).squeeze()
 
-        target_values = []
-        for _ in range(self.n_prime):
-            target_dist, target_tau = self.target_net.forward(next_observations)
-            target_actions = target_dist.sum(2).max(1)[1].detach()
-            target_value = target_dist.gather(1, target_actions.unsqueeze(1).unsqueeze(2).expand(self.batch_size, 1, self.quant_num)).squeeze()
-            target_value = rewards + self.gamma * target_value * (1. - dones)
-            target_value = target_value.detach()
-            target_values.append(target_value)
+        target_dist, target_tau = self.target_net.forward(next_observations, self.n_prime)
+        target_actions = target_dist.sum(2).max(1)[1].detach()
+        target_value = target_dist.gather(1, target_actions.unsqueeze(1).unsqueeze(2).expand(self.batch_size, 1, self.n_prime)).squeeze()
+        target_value = rewards + self.gamma * target_value * (1. - dones)
+        target_value = target_value.detach()
 
-        loss = self.computer_loss(taus, values, target_values)
+        loss = self.computer_loss(tau, value, target_value)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -196,14 +178,13 @@ if __name__ == '__main__':
                capacity=10000,
                episode=100000,
                exploration=1000,
-               k_sample=4,
+               k_sample=32,
                k=1.,
-               n=1,
-               n_prime=1,
+               n=8,
+               n_prime=8,
                gamma=0.99,
                batch_size=32,
                learning_rate=1e-3,
-               quant_num=64,
                epsilon_init=1.,
                decay=5000,
                epsilon_min=0.01,
