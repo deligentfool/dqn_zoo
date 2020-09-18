@@ -54,7 +54,7 @@ class net(nn.Module):
         cos_trans = torch.cos(quants * tau * np.pi).unsqueeze(2)
         # * cos_trans: [sample_num, sample_num, 1]
         rand_feat = F.relu(self.phi(cos_trans).mean(1) + self.phi_bias.unsqueeze(0)).unsqueeze(0)
-        # * rand_feat: [batch_size, sample_num, 128]
+        # * rand_feat: [1, sample_num, 128]
         x = x.unsqueeze(1)
         # * x: [batch_size, 1, 128]
         x = x * rand_feat
