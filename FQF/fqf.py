@@ -29,21 +29,23 @@ class replay_buffer(object):
 
 
 class fqf_net(nn.Module):
-    def __init__(self, observation_dim, action_dim, quant_num):
+    def __init__(self, observation_dim, action_dim, quant_num, cosine_num):
         super(fqf_net, self).__init__()
         self.observation_dim = observation_dim
         self.action_dim = action_dim
         self.quant_num = quant_num
+        self.cosine_num = cosine_num
 
         self.feature_layer = nn.Sequential(
             nn.Linear(self.observation_dim, 128),
             nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU()
+            nn.Linear(128, 128)
         )
 
-        self.phi = nn.Linear(1, 128, bias=False)
-        self.phi_bias = nn.Parameter(torch.zeros(128), requires_grad=True)
+        self.cosine_layer = nn.Sequential(
+            nn.Linear(self.cosine_num, 128),
+            nn.ReLU()
+        )
 
         self.psi_layer = nn.Sequential(
             nn.Linear(128, 128),
@@ -52,29 +54,29 @@ class fqf_net(nn.Module):
         )
 
         self.quantile_fraction_layer = nn.Sequential(
-            nn.Linear(128, 128),
-            nn.ReLU(),
             nn.Linear(128, self.quant_num),
             nn.Softmax(dim=-1)
         )
 
-    def forward(self, observation, tau=None):
-        state_embedding = self.feature_layer(observation)
-        entropy = None
-        if tau is None:
-            q = self.quantile_fraction_layer(state_embedding.detach())
-            tau_0 = torch.zeros(q.size(0), 1)
-            tau = torch.cat([tau_0, q], dim=-1)
-            tau = torch.cumsum(tau, dim=-1)
-            # * tau is the quantile vector [batch_size, quant_num]
-            entropy = torch.distributions.Categorical(probs=q).entropy()
-        # * tau_hat: [batch_size, quant_num]
-        tau_hat = ((tau[:, :-1] + tau[:, 1:]) / 2.).detach()
-        quants = torch.arange(0, tau.size(1), 1.0).unsqueeze(0).unsqueeze(0)
+    def calc_state_embedding(self, observation):
+        return self.feature_layer(observation)
 
-        cos_trans = torch.cos(quants * tau.unsqueeze(-1).detach() * np.pi).unsqueeze(-1)
-        # * cos_trans: [batch_size, quant_num, quant_num, 1]
-        rand_feat = F.relu(self.phi(cos_trans).mean(2) + self.phi_bias.unsqueeze(0).unsqueeze(0))
+    def calc_quantile_fraction(self, state_embedding):
+        assert not state_embedding.requires_grad
+        q = self.quantile_fraction_layer(state_embedding.detach())
+        tau_0 = torch.zeros(q.size(0), 1)
+        tau = torch.cat([tau_0, q], dim=-1)
+        tau = torch.cumsum(tau, dim=-1)
+        entropy = torch.distributions.Categorical(probs=q).entropy()
+        tau_hat = ((tau[:, :-1] + tau[:, 1:]) / 2.).detach()
+        return tau, tau_hat, entropy
+
+    def calc_quantile_value(self, tau, state_embedding):
+        assert not tau.requires_grad
+        quants = torch.arange(0, self.cosine_num, 1.0).unsqueeze(0).unsqueeze(0)
+        cos_trans = torch.cos(quants * tau.unsqueeze(-1).detach() * np.pi)
+        # * cos_trans: [batch_size, quant_num, cosine_num]
+        rand_feat = self.cosine_layer(cos_trans)
         # * rand_feat: [batch_size, quant_num, 128]
         x = state_embedding.unsqueeze(1)
         # * x: [batch_size, 1, 128]
@@ -82,33 +84,33 @@ class fqf_net(nn.Module):
         # * x: [batch_size, quant_num, 128]
         value = self.psi_layer(x).transpose(1, 2)
         # * value: [batch_size, action_dim, quant_num]
-        return value, tau, tau_hat, entropy
+        return value
 
     def act(self, observation, epsilon):
         if random.random() > epsilon:
-            sa_value = self.calc_sa_value(observation)
-            # * beta is set to be an identity mapping here so calculate the expectation
-            action = sa_value.max(1)[1].detach().item()
+            state_embedding = self.calc_state_embedding(observation)
+            tau, tau_hat, _ = self.calc_quantile_fraction(state_embedding.detach())
+            q_value = self.calc_q_value(state_embedding, tau, tau_hat)
+            action = q_value.max(1)[1].detach().item()
         else:
             action = random.choice(list(range(self.action_dim)))
         return action
 
-    def calc_sa_quantile_value(self, observation, action, tau_hat):
-        value, _, _, _ = self.forward(observation, tau_hat)
-        value = value.gather(1, action.unsqueeze(-1).unsqueeze(-1).expand(value.size(0), 1, value.size(-1))).squeeze(1)
-        return value
+    def calc_sa_quantile_value(self, state_embedding, action, tau):
+        sa_quantile_value = self.calc_quantile_value(tau.detach(), state_embedding)
+        sa_quantile_value = sa_quantile_value.gather(1, action.unsqueeze(-1).unsqueeze(-1).expand(sa_quantile_value.size(0), 1, sa_quantile_value.size(-1))).squeeze(1)
+        return sa_quantile_value
 
-    def calc_sa_value(self, observation):
-        value, tau, tau_hat, _ = self.forward(observation)
+    def calc_q_value(self, state_embedding, tau, tau_hat):
         tau_delta = tau[:, 1:] - tau[:, :-1]
-        tau_hat_value, _, _, _ = self.forward(observation, tau_hat)
-        sa_value = (tau_delta.unsqueeze(1) * tau_hat_value).sum(-1).detach()
-        return sa_value
+        tau_hat_value = self.calc_quantile_value(tau_hat.detach(), state_embedding)
+        q_value = (tau_delta.unsqueeze(1) * tau_hat_value).sum(-1).detach()
+        return q_value
 
 
 
 class fqf(object):
-    def __init__(self, env, capacity, episode, exploration, k, gamma, quant_num, batch_size, value_learning_rate, fraction_learning_rate, entropy_weight, epsilon_init, decay, epsilon_min, update_freq, render, log):
+    def __init__(self, env, capacity, episode, exploration, k, gamma, quant_num, cosine_num, batch_size, value_learning_rate, fraction_learning_rate, entropy_weight, epsilon_init, double_q, decay, epsilon_min, update_freq, render, log):
         self.env = env
         self.capacity = capacity
         self.episode = episode
@@ -126,14 +128,16 @@ class fqf(object):
         self.update_freq = update_freq
         self.render = render
         self.log = log
+        self.cosine_num = cosine_num
+        self.double_q = double_q
 
         self.observation_dim = self.env.observation_space.shape[0]
         self.action_dim = self.env.action_space.n
-        self.net = fqf_net(self.observation_dim, self.action_dim, self.quant_num)
-        self.target_net = fqf_net(self.observation_dim, self.action_dim, self.quant_num)
+        self.net = fqf_net(self.observation_dim, self.action_dim, self.quant_num, self.cosine_num)
+        self.target_net = fqf_net(self.observation_dim, self.action_dim, self.quant_num, self.cosine_num)
         self.target_net.load_state_dict(self.net.state_dict())
         self.buffer = replay_buffer(self.capacity)
-        self.quantile_value_param = list(self.net.feature_layer.parameters()) + list(self.net.phi.parameters()) + [self.net.phi_bias] + list(self.net.psi_layer.parameters())
+        self.quantile_value_param = list(self.net.feature_layer.parameters()) + list(self.net.cosine_layer.parameters()) + list(self.net.psi_layer.parameters())
         self.quantile_fraction_param = list(self.net.quantile_fraction_layer.parameters())
         self.quantile_value_optimizer = torch.optim.Adam(self.quantile_value_param, lr=self.value_learning_rate)
         self.quantile_fraction_optimizer = torch.optim.RMSprop(self.quantile_fraction_param, lr=self.fraction_learning_rate)
@@ -171,18 +175,28 @@ class fqf(object):
         next_observations = torch.FloatTensor(next_observations)
         dones = torch.FloatTensor(dones).unsqueeze(1)
 
-        dist, tau, tau_hat, entropy = self.net.forward(observations)
+        state_embedding = self.net.calc_state_embedding(observations)
+        tau, tau_hat, entropy = self.net.calc_quantile_fraction(state_embedding.detach())
+        dist = self.net.calc_quantile_value(tau_hat.detach(), state_embedding)
         value = dist.gather(1, actions.unsqueeze(1).unsqueeze(2).expand(self.batch_size, 1, dist.size(2))).squeeze()
 
-        target_dist, _, _, _ = self.target_net.forward(next_observations, tau)
-        target_actions = target_dist.sum(2).max(1)[1].detach()
+        if not self.double_q:
+            next_state_embedding = self.target_net.calc_state_embedding(next_observations)
+            # * have to use the eval_net's quantile fraction network
+            next_tau, next_tau_hat, _ = self.net.calc_quantile_fraction(next_state_embedding.detach())
+            target_actions = self.target_net.calc_q_value(next_state_embedding, next_tau, next_tau_hat).max(1)[1].detach()
+        else:
+            next_state_embedding = self.net.calc_state_embedding(next_observations)
+            next_tau, next_tau_hat, _ = self.net.calc_quantile_fraction(next_state_embedding.detach())
+            target_actions = self.net.calc_q_value(next_state_embedding, next_tau, next_tau_hat).max(1)[1].detach()
+        next_state_embedding = self.target_net.calc_state_embedding(next_observations)
+        target_dist = self.target_net.calc_quantile_value(tau_hat.detach(), next_state_embedding)
         target_value = target_dist.gather(1, target_actions.unsqueeze(1).unsqueeze(2).expand(self.batch_size, 1, target_dist.size(2))).squeeze()
         target_value = rewards + self.gamma * target_value * (1. - dones)
         target_value = target_value.detach()
 
-
-        qauntile_value_loss = self.calc_quantile_value_loss(tau.detach(), value, target_value)
-        quantile_fraction_loss = self.calc_quantile_fraction_loss(observations, actions, tau, tau_hat)
+        qauntile_value_loss = self.calc_quantile_value_loss(tau_hat.detach(), value, target_value)
+        quantile_fraction_loss = self.calc_quantile_fraction_loss(state_embedding, actions, tau, tau_hat)
         entropy_loss = - (self.entropy_weight * entropy).mean()
 
         self.quantile_fraction_optimizer.zero_grad()
@@ -237,10 +251,12 @@ if __name__ == '__main__':
                gamma=0.99,
                batch_size=32,
                quant_num=32,
-               value_learning_rate=5e-4,
-               fraction_learning_rate=2.5e-9,
-               entropy_weight=1e-4,
-               epsilon_init=1.,
+               cosine_num=64,
+               value_learning_rate=1e-3,
+               fraction_learning_rate=1e-9,
+               entropy_weight=0,
+               double_q=True,
+               epsilon_init=1,
                decay=5000,
                epsilon_min=0.01,
                update_freq=200,
