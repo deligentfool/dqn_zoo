@@ -162,7 +162,12 @@ class fqf(object):
         assert not tau_hat.requires_grad
         sa_quantile_hat = self.net.calc_sa_quantile_value(observations, actions, tau_hat).detach()
         sa_quantile = self.net.calc_sa_quantile_value(observations, actions, tau[:, 1:-1]).detach()
-        gradient_tau = 2 * sa_quantile - sa_quantile_hat[:, :-1] - sa_quantile_hat[:, 1:]
+        #gradient_tau = 2 * sa_quantile - sa_quantile_hat[:, :-1] - sa_quantile_hat[:, 1:]
+        value_1 = sa_quantile - sa_quantile_hat[:, :-1]
+        signs_1 = sa_quantile > torch.cat([sa_quantile_hat[:, :1], sa_quantile[:, :-1]], dim=-1)
+        value_2 = sa_quantile - sa_quantile_hat[:, 1:]
+        signs_2 = sa_quantile < torch.cat([sa_quantile[:, 1:], sa_quantile_hat[:, -1:]], dim=-1)
+        gradient_tau = (torch.where(signs_1, value_1, -value_1) + torch.where(signs_2, value_2, -value_2)).view(*value_1.size())
         return (gradient_tau.detach() * tau[:, 1: -1]).sum(1).mean()
 
 
@@ -177,6 +182,7 @@ class fqf(object):
 
         state_embedding = self.net.calc_state_embedding(observations)
         tau, tau_hat, entropy = self.net.calc_quantile_fraction(state_embedding.detach())
+        # * use tau_hat to calculate the quantile value
         dist = self.net.calc_quantile_value(tau_hat.detach(), state_embedding)
         value = dist.gather(1, actions.unsqueeze(1).unsqueeze(2).expand(self.batch_size, 1, dist.size(2))).squeeze()
 
@@ -190,6 +196,7 @@ class fqf(object):
             next_tau, next_tau_hat, _ = self.net.calc_quantile_fraction(next_state_embedding.detach())
             target_actions = self.net.calc_q_value(next_state_embedding, next_tau, next_tau_hat).max(1)[1].detach()
         next_state_embedding = self.target_net.calc_state_embedding(next_observations)
+        # * also use tau_hat to calculate the quantile value
         target_dist = self.target_net.calc_quantile_value(tau_hat.detach(), next_state_embedding)
         target_value = target_dist.gather(1, target_actions.unsqueeze(1).unsqueeze(2).expand(self.batch_size, 1, target_dist.size(2))).squeeze()
         target_value = rewards + self.gamma * target_value * (1. - dones)
