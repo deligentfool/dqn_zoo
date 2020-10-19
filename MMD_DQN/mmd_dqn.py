@@ -52,7 +52,7 @@ class mmd_ddqn(nn.Module):
         return action
 
 
-def train(buffer, target_model, eval_model, gamma, optimizer, batch_size, count, soft_update_freq, device):
+def train(buffer, eval_model, gamma, optimizer, batch_size, count, device):
     observation, action, reward, next_observation, done = buffer.sample(batch_size)
 
     observation = torch.FloatTensor(observation).to(device)
@@ -63,18 +63,18 @@ def train(buffer, target_model, eval_model, gamma, optimizer, batch_size, count,
 
     particle_num = eval_model.particle_num
     q_particle_values = eval_model.forward(observation)
-    next_q_particle_values = target_model.forward(next_observation)
+    next_q_particle_values = eval_model.forward(next_observation)
     argmax_actions = eval_model.forward(next_observation).mean(-1).max(1)[1].detach()
     next_q_particle_value = next_q_particle_values.gather(1, argmax_actions.unsqueeze(1).unsqueeze(-1).repeat([1, 1, next_q_particle_values.size(-1)])).squeeze(1)
     q_particle_value = q_particle_values.gather(1, action.unsqueeze(1).unsqueeze(-1).repeat([1, 1, q_particle_values.size(-1)])).squeeze(1)
-    expected_q_particle_value = (reward.unsqueeze(-1) + gamma * (1 - done.unsqueeze(-1)) * next_q_particle_value).detach()
+    expected_q_particle_value = (reward.unsqueeze(-1) + gamma * (1 - done.unsqueeze(-1)) * next_q_particle_value)
 
     #loss = loss_fn(q_value, expected_q_value.detach())
     first_item = 0
     first_kernel = -(q_particle_value.unsqueeze(-1) - q_particle_value.unsqueeze(-2)).pow(2)
     for h in range(1, 11):
         first_item += (first_kernel / h).exp()
-    first_item = first_item.sum() / (particle_num ** 2)
+    first_item = (first_item.sum(-1).sum(-1) / (particle_num ** 2)).mean()
 
     second_item = 0
     second_kernel = -(expected_q_particle_value.unsqueeze(-1) - expected_q_particle_value.unsqueeze(-2))
@@ -86,27 +86,24 @@ def train(buffer, target_model, eval_model, gamma, optimizer, batch_size, count,
     third_kernel = -(q_particle_value.unsqueeze(-1) - expected_q_particle_value.unsqueeze(-2)).pow(2)
     for h in range(1, 11):
         third_item += (third_kernel / h).exp()
-    third_item = third_item.sum() / (particle_num ** 2)
+    third_item = (third_item.sum(-1).sum(-1) / (particle_num ** 2)).mean()
     loss = first_item + second_item - 2 * third_item
 
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-    if count % soft_update_freq == 0:
-        target_model.load_state_dict(eval_model.state_dict())
 
 
 if __name__ == '__main__':
     gamma = 0.99
     learning_rate = 1e-3
     batch_size = 64
-    soft_update_freq = 100
     capacity = 10000
     exploration = 100
     epsilon_init = 0.9
     epsilon_min = 0.05
     decay = 0.99
-    episode = 1000000
+    episode = 10000
     particle_num = 200
     render = False
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -115,9 +112,7 @@ if __name__ == '__main__':
     env = env.unwrapped
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
-    target_net = mmd_ddqn(observation_dim, action_dim, particle_num).to(device)
     eval_net = mmd_ddqn(observation_dim, action_dim, particle_num).to(device)
-    eval_net.load_state_dict(target_net.state_dict())
     optimizer = torch.optim.Adam(eval_net.parameters(), lr=learning_rate)
     buffer = replay_buffer(capacity)
     epsilon = epsilon_init
@@ -141,7 +136,7 @@ if __name__ == '__main__':
             if render:
                 env.render()
             if i > exploration:
-                train(buffer, target_net, eval_net, gamma, optimizer, batch_size, count, soft_update_freq, device)
+                train(buffer, eval_net, gamma, optimizer, batch_size, count, device)
 
             if done:
                 if not weight_reward:
