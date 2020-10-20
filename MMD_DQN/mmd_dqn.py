@@ -6,6 +6,16 @@ import random
 from collections import deque
 import gym
 
+
+def calc_bandwidth(kernel, kernel_num=10, max_scale=2, min_scale=0.1):
+    # * kernel: [batch_size, particle_num, particle_num]
+    kernel_mean = kernel.mean(-1).max(-1)[0]
+    scale_list = list(np.linspace(min_scale, max_scale, kernel_num))
+    bandwidth_list = [(kernel_mean * scale).view(-1, 1, 1).detach() for scale in scale_list]
+    return bandwidth_list
+
+
+
 class replay_buffer(object):
     def __init__(self, capacity):
         self.capacity = capacity
@@ -70,24 +80,27 @@ def train(buffer, eval_model, target_model, gamma, optimizer, batch_size, count,
     expected_q_particle_value = (reward.unsqueeze(-1) + gamma * (1 - done.unsqueeze(-1)) * next_q_particle_value).detach()
 
 
-    h_list = list(np.linspace(1, 400, 20))
+    #h_list = list(np.linspace(1, 400, 20))
     #loss = loss_fn(q_value, expected_q_value.detach())
     first_item = 0
-    first_kernel = -(q_particle_value.unsqueeze(-1) - q_particle_value.unsqueeze(-2)).pow(2)
+    first_kernel = (q_particle_value.unsqueeze(-1) - q_particle_value.unsqueeze(-2)).pow(2)
+    h_list = calc_bandwidth(first_kernel)
     for h in h_list:
-        first_item += (first_kernel / h).exp()
+        first_item += (-first_kernel / h).exp()
     first_item = (first_item.sum(-1).sum(-1) / (particle_num ** 2)).mean()
 
     second_item = 0
-    second_kernel = -(expected_q_particle_value.unsqueeze(-1) - expected_q_particle_value.unsqueeze(-2)).pow(2)
+    second_kernel = (expected_q_particle_value.unsqueeze(-1) - expected_q_particle_value.unsqueeze(-2)).pow(2)
+    h_list = calc_bandwidth(second_kernel)
     for h in h_list:
-        second_item += (second_kernel / h).exp()
+        second_item += (-second_kernel / h).exp()
     second_item = (second_item.sum(-1).sum(-1) / (particle_num ** 2)).mean()
 
     third_item = 0
-    third_kernel = -(q_particle_value.unsqueeze(-1) - expected_q_particle_value.unsqueeze(-2)).pow(2)
+    third_kernel = (q_particle_value.unsqueeze(-1) - expected_q_particle_value.unsqueeze(-2)).pow(2)
+    h_list = calc_bandwidth(third_kernel)
     for h in h_list:
-        third_item += (third_kernel / h).exp()
+        third_item += (-third_kernel / h).exp()
     third_item = (third_item.sum(-1).sum(-1) / (particle_num ** 2)).mean()
     loss = first_item + second_item - 2 * third_item
 
