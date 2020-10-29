@@ -7,13 +7,37 @@ from collections import deque
 import gym
 
 
-def calc_bandwidth(kernel, kernel_num=10, max_scale=2, min_scale=0.1):
-    # * kernel: [batch_size, particle_num, particle_num]
-    kernel_mean = kernel.mean(-1).max(-1)[0]
-    scale_list = list(np.linspace(min_scale, max_scale, kernel_num))
-    bandwidth_list = [(kernel_mean * scale).view(-1, 1, 1).detach() for scale in scale_list]
-    return bandwidth_list
+def set_seed(seed):
+     torch.manual_seed(seed)
+     torch.cuda.manual_seed_all(seed)
+     np.random.seed(seed)
+     random.seed(seed)
+     torch.backends.cudnn.deterministic = True
 
+#def calc_bandwidth(kernel, kernel_num=10, max_scale=2.0, min_scale=0.1):
+#    # * kernel: [batch_size, particle_num, particle_num]
+#    kernel_mean = kernel.mean(-1).max(-1)[0]
+#    scale_list = list(np.linspace(min_scale, max_scale, kernel_num))
+#    bandwidth_list = [(kernel_mean * scale).view(-1, 1, 1).detach() for scale in scale_list]
+#    return bandwidth_list
+
+#def calc_bandwidth(kernel, kernel_num=10, kernel_mul=2.0):
+#    # * kernel: [batch_size, particle_num, particle_num]
+#    kernel_mean = kernel.mean(-1).mean(-1)
+#    bandwidth = kernel_mean / (kernel_mul ** (kernel_num // 2))
+#    bandwidth_list = [(bandwidth * (kernel_mul ** i)).detach().view(-1, 1, 1) for i in range(kernel_num)]
+#    return bandwidth_list
+
+
+def calc_bandwidth(set1, set2, kernel_num=10):
+    batch_size = set1.size(0)
+    seq_len = set2.size(0)
+    set1_centre = set1.mean(-1).view(-1, 1)
+    set2_centre = set2.mean(-1).view(1, -1)
+    distance = (set1_centre - set2_centre).pow(2).pow(0.5).max(-1)[0].max(-1)[0]
+    delta_list = [distance / np.sqrt(2 * (i + 1)) for i in range(kernel_num)]
+    bandwidth_list = [((2 * delta ** 2)).detach() for delta in delta_list]
+    return bandwidth_list
 
 
 class replay_buffer(object):
@@ -80,29 +104,30 @@ def train(buffer, eval_model, target_model, gamma, optimizer, batch_size, count,
     expected_q_particle_value = (reward.unsqueeze(-1) + gamma * (1 - done.unsqueeze(-1)) * next_q_particle_value).detach()
 
 
-    #h_list = list(np.linspace(1, 400, 20))
-    #loss = loss_fn(q_value, expected_q_value.detach())
     first_item = 0
     first_kernel = (q_particle_value.unsqueeze(-1) - q_particle_value.unsqueeze(-2)).pow(2)
-    h_list = calc_bandwidth(first_kernel)
+    #h_list = calc_bandwidth(first_kernel)
+    h_list = calc_bandwidth(q_particle_value, q_particle_value)
     for h in h_list:
         first_item += (-first_kernel / h).exp()
     first_item = (first_item.sum(-1).sum(-1) / (particle_num ** 2)).mean()
 
-    second_item = 0
-    second_kernel = (expected_q_particle_value.unsqueeze(-1) - expected_q_particle_value.unsqueeze(-2)).pow(2)
-    h_list = calc_bandwidth(second_kernel)
-    for h in h_list:
-        second_item += (-second_kernel / h).exp()
-    second_item = (second_item.sum(-1).sum(-1) / (particle_num ** 2)).mean()
+    #second_item = 0
+    #second_kernel = (expected_q_particle_value.unsqueeze(-1) - expected_q_particle_value.unsqueeze(-2)).pow(2)
+    #h_list = calc_bandwidth(second_kernel)
+    #for h in h_list:
+    #    second_item += (-second_kernel / h).exp()
+    #second_item = (second_item.sum(-1).sum(-1) / (particle_num ** 2)).mean()
 
     third_item = 0
     third_kernel = (q_particle_value.unsqueeze(-1) - expected_q_particle_value.unsqueeze(-2)).pow(2)
-    h_list = calc_bandwidth(third_kernel)
+    #h_list = calc_bandwidth(third_kernel)
+    h_list = calc_bandwidth(q_particle_value, expected_q_particle_value)
     for h in h_list:
         third_item += (-third_kernel / h).exp()
     third_item = (third_item.sum(-1).sum(-1) / (particle_num ** 2)).mean()
-    loss = first_item + second_item - 2 * third_item
+    #loss = first_item + second_item - 2 * third_item
+    loss = first_item - 2 * third_item
 
     optimizer.zero_grad()
     loss.backward()
@@ -122,11 +147,13 @@ if __name__ == '__main__':
     epsilon_min = 0.01
     decay = 0.998
     episode = 10000
-    particle_num = 200
+    particle_num = 32
     render = False
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+    set_seed(2020)
     env = gym.make('CartPole-v0')
+    env.seed(2020)
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
     eval_net = mmd_ddqn(observation_dim, action_dim, particle_num).to(device)

@@ -9,6 +9,13 @@ from collections import deque
 from torch.utils.tensorboard import SummaryWriter
 
 
+def set_seed(seed):
+     torch.manual_seed(seed)
+     torch.cuda.manual_seed_all(seed)
+     np.random.seed(seed)
+     random.seed(seed)
+     torch.backends.cudnn.deterministic = True
+
 class replay_buffer(object):
     def __init__(self, capacity):
         self.capacity = capacity
@@ -247,7 +254,10 @@ class fqf(object):
 
 
 if __name__ == '__main__':
+    seed = 2020
+    set_seed(seed)
     env = gym.make('CartPole-v0')
+    env.seed(seed)
     env = env.unwrapped
     torch.autograd.set_detect_anomaly(True)
     test = fqf(env=env,
