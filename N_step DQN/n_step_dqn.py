@@ -66,7 +66,7 @@ class ddqn(nn.Module):
         return action
 
 
-def train(buffer, target_model, eval_model, gamma, optimizer, batch_size, loss_fn, count, soft_update_freq):
+def train(buffer, target_model, eval_model, gamma, optimizer, batch_size, loss_fn, count, soft_update_freq, n_step):
     observation, action, reward, next_observation, done = buffer.sample(batch_size)
 
     observation = torch.FloatTensor(observation)
@@ -80,7 +80,7 @@ def train(buffer, target_model, eval_model, gamma, optimizer, batch_size, loss_f
     argmax_actions = eval_model.forward(next_observation).max(1)[1].detach()
     next_q_value = next_q_values.gather(1, argmax_actions.unsqueeze(1)).squeeze(1)
     q_value = q_values.gather(1, action.unsqueeze(1)).squeeze(1)
-    expected_q_value = reward + gamma * (1 - done) * next_q_value
+    expected_q_value = reward + (gamma ** n_step) * (1 - done) * next_q_value
 
     #loss = loss_fn(q_value, expected_q_value.detach())
     loss = (expected_q_value.detach() - q_value).pow(2)
@@ -104,6 +104,7 @@ if __name__ == '__main__':
     epsilon_min = 0.01
     decay = 0.99
     episode = 1000000
+    n_step = 4
     render = False
 
     env = gym.make('CartPole-v0')
@@ -114,7 +115,7 @@ if __name__ == '__main__':
     eval_net = ddqn(observation_dim, action_dim)
     eval_net.load_state_dict(target_net.state_dict())
     optimizer = torch.optim.Adam(eval_net.parameters(), lr=learning_rate)
-    buffer = n_step_replay_buffer(capacity, 4, gamma)
+    buffer = n_step_replay_buffer(capacity, n_step, gamma)
     loss_fn = nn.MSELoss()
     epsilon = epsilon_init
     count = 0
@@ -137,7 +138,7 @@ if __name__ == '__main__':
             if render:
                 env.render()
             if i > exploration:
-                train(buffer, target_net, eval_net, gamma, optimizer, batch_size, loss_fn, count, soft_update_freq)
+                train(buffer, target_net, eval_net, gamma, optimizer, batch_size, loss_fn, count, soft_update_freq, n_step)
 
             if done:
                 if not weight_reward:

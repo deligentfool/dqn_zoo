@@ -80,7 +80,7 @@ class f_net(nn.Module):
 
         self.fc_layer = nn.Sequential(
             nn.Linear(self.embedding_dim, self.hidden_dim),
-            nn.Sigmoid(),
+            nn.ReLU(),
             nn.Linear(self.hidden_dim, self.action_dim)
         )
 
@@ -172,16 +172,14 @@ class ndqfn_net(nn.Module):
     def calc_quantile_value(self, tau, state_embedding):
         assert not tau.requires_grad
         p_value = self.calc_fix_quantile_value(state_embedding)
-        cum_sum_p_value = torch.cumsum(p_value[:, :, 1:], dim=-1) / self.p_num
-        cum_sum_p_value = cum_sum_p_value + p_value[:, :, 0].unsqueeze(-1)
-        cum_sum_p_value = torch.cat([p_value[:, :, 0].unsqueeze(-1), cum_sum_p_value], dim=-1)
+        cum_sum_p_value = torch.cumsum(p_value, dim=-1)
         p_floor = (tau * self.p_num).floor().long()
         p_ceil = (tau * self.p_num).ceil().long()
-        assert p_ceil.max() < p_value.size(-1)
+        #assert p_ceil.max() < p_value.size(-1)
         value_ceil = p_value.gather(2, p_ceil.unsqueeze(1).repeat([1, cum_sum_p_value.size(1), 1]))
         value = cum_sum_p_value.gather(2, p_floor.unsqueeze(1).repeat([1, cum_sum_p_value.size(1), 1]))
         #assert torch.min(self.p[p_ceil] - self.p[p_floor]) > 0
-        value = value + ((tau - self.p[p_floor]) / torch.clamp_min(self.p[p_ceil] - self.p[p_floor], 1e-10) * ((self.p[p_ceil] - self.p[p_floor]) == 0)).unsqueeze(1).repeat([1, cum_sum_p_value.size(1), 1]) * value_ceil / self.p_num
+        value = value + ((tau - self.p[p_floor]) / torch.clamp_min(self.p[p_ceil] - self.p[p_floor], 0.001) * ((self.p[p_ceil] - self.p[p_floor]) != 0)).unsqueeze(1).repeat([1, cum_sum_p_value.size(1), 1]) * value_ceil
         return value
 
     def act(self, observation, epsilon):
@@ -259,12 +257,12 @@ class ndqfn(object):
         assert not tau_hat.requires_grad
         sa_quantile_hat = self.net.calc_sa_quantile_value(observations, actions, tau_hat).detach()
         sa_quantile = self.net.calc_sa_quantile_value(observations, actions, tau[:, 1:-1]).detach()
-        #gradient_tau = 2 * sa_quantile - sa_quantile_hat[:, :-1] - sa_quantile_hat[:, 1:]
-        value_1 = sa_quantile - sa_quantile_hat[:, :-1]
-        signs_1 = sa_quantile > torch.cat([sa_quantile_hat[:, :1], sa_quantile[:, :-1]], dim=-1)
-        value_2 = sa_quantile - sa_quantile_hat[:, 1:]
-        signs_2 = sa_quantile < torch.cat([sa_quantile[:, 1:], sa_quantile_hat[:, -1:]], dim=-1)
-        gradient_tau = (torch.where(signs_1, value_1, -value_1) + torch.where(signs_2, value_2, -value_2)).view(*value_1.size())
+        gradient_tau = 2 * sa_quantile - sa_quantile_hat[:, :-1] - sa_quantile_hat[:, 1:]
+        #value_1 = sa_quantile - sa_quantile_hat[:, :-1]
+        #signs_1 = sa_quantile > torch.cat([sa_quantile_hat[:, :1], sa_quantile[:, :-1]], dim=-1)
+        #value_2 = sa_quantile - sa_quantile_hat[:, 1:]
+        #signs_2 = sa_quantile < torch.cat([sa_quantile[:, 1:], sa_quantile_hat[:, -1:]], dim=-1)
+        #gradient_tau = (torch.where(signs_1, value_1, -value_1) + torch.where(signs_2, value_2, -value_2)).view(*value_1.size())
         loss = (gradient_tau.detach() * tau[:, 1: -1]).sum(1).mean()
         return loss
 
@@ -350,7 +348,7 @@ if __name__ == '__main__':
     seed = 2020
     set_seed(seed)
     env = gym.make('CartPole-v0')
-    #env = env.unwrapped
+    env = env.unwrapped
     env.seed(seed)
     test = ndqfn(
         env=env,

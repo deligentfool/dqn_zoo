@@ -144,7 +144,7 @@ class rainbow_dqn(nn.Module):
         return action
 
 
-def projection_distribution(target_model, next_observation, reward, done, v_min, v_max, atoms_num, gamma):
+def projection_distribution(target_model, next_observation, reward, done, v_min, v_max, atoms_num, gamma, n_step):
     batch_size = next_observation.size(0)
     delta_z = float(v_max - v_min) / (atoms_num - 1)
     support = torch.linspace(v_min, v_max, atoms_num)
@@ -159,7 +159,7 @@ def projection_distribution(target_model, next_observation, reward, done, v_min,
     done = done.unsqueeze(1).expand_as(next_dist)
     support = support.unsqueeze(0).expand_as(next_dist)
 
-    Tz = reward + (1 - done) * gamma * support
+    Tz = reward + (1 - done) * (gamma ** n_step) * support
     Tz = Tz.clamp(min=v_min, max=v_max)
     b = (Tz - v_min) / delta_z
     l = b.floor().long()
@@ -173,7 +173,7 @@ def projection_distribution(target_model, next_observation, reward, done, v_min,
     return proj_dist.detach()
 
 
-def train(eval_model, target_model, buffer, v_min, v_max, atoms_num, gamma, batch_size, optimizer, count, update_freq):
+def train(eval_model, target_model, buffer, v_min, v_max, atoms_num, gamma, batch_size, optimizer, count, update_freq, n_step):
     observation, action, reward, next_observation, done = buffer.sample(batch_size)
 
     observation = torch.FloatTensor(observation)
@@ -182,7 +182,7 @@ def train(eval_model, target_model, buffer, v_min, v_max, atoms_num, gamma, batc
     next_observation = torch.FloatTensor(next_observation)
     done = torch.FloatTensor(done)
 
-    proj_dist = projection_distribution(target_model, next_observation, reward, done, v_min, v_max, atoms_num, gamma)
+    proj_dist = projection_distribution(target_model, next_observation, reward, done, v_min, v_max, atoms_num, gamma, n_step)
 
     dist = eval_model.forward(observation)
     action = action.unsqueeze(1).unsqueeze(1).expand(batch_size, 1, atoms_num)
@@ -247,7 +247,7 @@ if __name__ == '__main__':
             reward_total += reward
             obs = next_obs
             if i > exploration:
-                train(eval_net, target_net, buffer, v_min, v_max, atoms_num, gamma, batch_size, optimizer, count, update_freq)
+                train(eval_net, target_net, buffer, v_min, v_max, atoms_num, gamma, batch_size, optimizer, count, update_freq, n_step)
             if done:
                 if epsilon > epsilon_min:
                     epsilon = epsilon * epsilon_decay

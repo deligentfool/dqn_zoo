@@ -117,7 +117,7 @@ class fqf_net(nn.Module):
 
 
 class fqf(object):
-    def __init__(self, env, capacity, episode, exploration, k, gamma, quant_num, cosine_num, batch_size, value_learning_rate, fraction_learning_rate, entropy_weight, epsilon_init, double_q, decay, epsilon_min, update_freq, render, log):
+    def __init__(self, env, capacity, episode, exploration, k, gamma, quant_num, cosine_num, batch_size, value_learning_rate, fraction_learning_rate, entropy_weight, epsilon_init, double_q, decay, epsilon_min, update_freq, render):
         self.env = env
         self.capacity = capacity
         self.episode = episode
@@ -134,7 +134,6 @@ class fqf(object):
         self.entropy_weight = entropy_weight
         self.update_freq = update_freq
         self.render = render
-        self.log = log
         self.cosine_num = cosine_num
         self.double_q = double_q
 
@@ -149,7 +148,6 @@ class fqf(object):
         self.quantile_value_optimizer = torch.optim.Adam(self.quantile_value_param, lr=self.value_learning_rate)
         self.quantile_fraction_optimizer = torch.optim.RMSprop(self.quantile_fraction_param, lr=self.fraction_learning_rate)
         self.epsilon = lambda x: self.epsilon_min + (self.epsilon_init - self.epsilon_min) * math.exp(-1. * x / self.decay)
-        self.writer = SummaryWriter('run/fqf')
         self.count = 0
         self.weight_reward = None
 
@@ -260,23 +258,24 @@ if __name__ == '__main__':
     env.seed(seed)
     env = env.unwrapped
     torch.autograd.set_detect_anomaly(True)
-    test = fqf(env=env,
-               capacity=10000,
-               episode=100000,
-               exploration=1000,
-               k=1.,
-               gamma=0.99,
-               batch_size=32,
-               quant_num=32,
-               cosine_num=64,
-               value_learning_rate=1e-3,
-               fraction_learning_rate=1e-9,
-               entropy_weight=0,
-               double_q=True,
-               epsilon_init=1,
-               decay=5000,
-               epsilon_min=0.01,
-               update_freq=200,
-               render=False,
-               log=False)
+    test = fqf(
+        env=env,
+        capacity=10000,
+        episode=100000,
+        exploration=1000,
+        k=1.,
+        gamma=0.99,
+        batch_size=32,
+        quant_num=32,
+        cosine_num=64,
+        value_learning_rate=1e-3,
+        fraction_learning_rate=1e-9,
+        entropy_weight=0,
+        double_q=True,
+        epsilon_init=1,
+        decay=5000,
+        epsilon_min=0.01,
+        update_freq=200,
+        render=False,
+    )
     test.run()
