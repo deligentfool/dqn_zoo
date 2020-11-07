@@ -15,24 +15,114 @@ def set_seed(seed):
      torch.backends.cudnn.deterministic = True
 
 
-def calc_bandwidth(first_kernel, third_kernel, kernel_num=20, max_scale=2.0, min_scale=0.1):
+#def calc_bandwidth(first_kernel, second_kernel, third_kernel, kernel_num=20, max_scale=200, min_scale=1):
+#    # * kernel: [batch_size, particle_num, particle_num]
+#    particle_num = first_kernel.size(-1)
+#    bandwidth_list = list(np.linspace(min_scale, max_scale, kernel_num))
+#    first_items = 0
+#    third_items = 0
+#    for h in bandwidth_list:
+#        first_inner_distance = (-first_kernel / h).exp()
+#        intra_distance = (-third_kernel / h).exp()
+#
+#        first_items += first_inner_distance
+#        third_items += intra_distance
+#
+#    return first_items, third_items
+
+
+def calc_bandwidth(first_kernel, third_kernel, kernel_num=20):
     # * kernel: [batch_size, particle_num, particle_num]
-    kernel_mean = torch.cat([first_kernel, third_kernel], dim=-1).mean(-1).max(-1)[0]
     particle_num = first_kernel.size(-1)
-    kernel_num
-    scale_list = list(np.linspace(min_scale, max_scale, num=kernel_num))
-    bandwidth_list = [(kernel_mean * scale).view(-1, 1, 1).detach() for scale in scale_list]
+    bandwidth_list = [2 ** i for i in range(kernel_num)]
     first_items = 0
     third_items = 0
     for h in bandwidth_list:
+        h = 2 * (h ** 2)
         first_inner_distance = (-first_kernel / h).exp()
         intra_distance = (-third_kernel / h).exp()
 
         first_items += first_inner_distance
         third_items += intra_distance
+
     return first_items, third_items
 
 
+#def calc_bandwidth(first_kernel, second_kernel, third_kernel, kernel_num=20, max_scale=1.0, min_scale=0.01):
+#    # * kernel: [batch_size, particle_num, particle_num]
+#    kernel_mean = third_kernel.mean(-1).max(-1)[0]
+#    particle_num = first_kernel.size(-1)
+#    scale_list = list(np.linspace(min_scale, max_scale, num=kernel_num))
+#    bandwidth_list = [(kernel_mean * scale).view(-1, 1, 1).detach() for scale in scale_list]
+#    first_items = 0
+#    third_items = 0
+#    for h in bandwidth_list:
+#        first_inner_distance = (-first_kernel / h).exp()
+#        intra_distance = (-third_kernel / h).exp()
+#
+#        first_items += first_inner_distance
+#        third_items += intra_distance
+#
+#    return first_items, third_items
+
+
+#def calc_bandwidth(first_kernel, second_kernel, third_kernel, kernel_num=20, topk=10, max_scale=2.5, min_scale=1.5):
+#    # * kernel: [batch_size, particle_num, particle_num]
+#    kernel_median = third_kernel.median(-1)[0].median(-1)[0]
+#    particle_num = first_kernel.size(-1)
+#    scale_list = list(np.linspace(min_scale, max_scale, num=kernel_num))
+#    bandwidth_list = [(kernel_median * scale).view(-1, 1, 1).detach() for scale in scale_list]
+#    true_counts = []
+#    first_items = []
+#    third_items = []
+#    for h in bandwidth_list:
+#        first_inner_distance = (-first_kernel / h).exp()
+#        second_inner_distance = (-second_kernel / h).exp()
+#        intra_distance = (-third_kernel / h).exp()
+#
+#        first_true_count = (first_inner_distance.mean(-1) > intra_distance.mean(-1)).sum(-1, keepdim=True)
+#        second_true_count = (second_inner_distance.mean(-1) > intra_distance.mean(-2)).sum(-1, keepdim=True)
+#        true_count = first_true_count + second_true_count
+#        true_counts.append(true_count)
+#        first_items.append(first_inner_distance)
+#        third_items.append(intra_distance)
+#
+#    _, idxs = torch.cat(true_counts, dim=-1).detach().topk(topk)
+#    first_items = torch.stack(first_items, dim=-3)
+#    third_items = torch.stack(third_items, dim=-3)
+#    idxs = idxs.unsqueeze(-1).unsqueeze(-1).repeat([1, 1, first_items.size(-2), first_items.size(-1)])
+#    first_items = first_items.gather(-3, idxs).sum(-3)
+#    third_items = third_items.gather(-3, idxs).sum(-3)
+#    return first_items, third_items
+
+
+#def calc_bandwidth(first_kernel, second_kernel, third_kernel, kernel_num=40, topk=20, max_scale=200, min_scale=1):
+#    # * kernel: [batch_size, particle_num, particle_num]
+#    particle_num = first_kernel.size(-1)
+#    #bandwidth_list = list(min_scale + np.random.rand(kernel_num) * (max_scale - min_scale))
+#    bandwidth_list = list(np.linspace(min_scale, max_scale, kernel_num))
+#    true_counts = []
+#    first_items = []
+#    third_items = []
+#    for h in bandwidth_list:
+#        first_inner_distance = (-first_kernel / h).exp()
+#        second_inner_distance = (-second_kernel / h).exp()
+#        intra_distance = (-third_kernel / h).exp()
+#
+#        first_true_count = (first_inner_distance.mean(-1) > intra_distance.mean(-1)).sum(-1, keepdim=True)
+#        second_true_count = (second_inner_distance.mean(-1) > intra_distance.mean(-2)).sum(-1, keepdim=True)
+#        true_count = first_true_count + second_true_count
+#        true_counts.append(true_count)
+#        first_items.append(first_inner_distance)
+#        third_items.append(intra_distance)
+#
+#    _, idxs = torch.cat(true_counts, dim=-1).detach().topk(topk)
+#    first_items = torch.stack(first_items, dim=-3)
+#    third_items = torch.stack(third_items, dim=-3)
+#    idxs = idxs.unsqueeze(-1).unsqueeze(-1).repeat([1, 1, first_items.size(-2), first_items.size(-1)])
+#    first_items = first_items.gather(-3, idxs).sum(-3)
+#    third_items = third_items.gather(-3, idxs).sum(-3)
+#    return first_items, third_items
 
 class replay_buffer(object):
     def __init__(self, capacity):
@@ -121,8 +211,8 @@ if __name__ == '__main__':
     capacity = 100000
     exploration = 100
     epsilon_init = 0.9
-    epsilon_min = 0.01
-    decay = 0.998
+    epsilon_min = 0.05
+    decay = 0.992
     episode = 10000
     particle_num = 32
     render = False
