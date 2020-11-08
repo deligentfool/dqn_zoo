@@ -100,14 +100,14 @@ class kl_aed(nn.Module):
 
         self.encoder = nn.Sequential(
             nn.Linear(self.input_dim, 8),
-            nn.ReLU(),
+            #nn.Sigmoid(),
             nn.Linear(8, self.embedding_dim),
             #nn.Tanh()
         )
 
         self.decoder = nn.Sequential(
             nn.Linear(self.embedding_dim, 8),
-            nn.ReLU(),
+            #nn.Sigmoid(),
             nn.Linear(8, self.input_dim),
         )
 
@@ -147,13 +147,13 @@ def rl_train(buffer, eval_model, target_model, gamma, rl_optimizer, aed_model, b
     first_item = (first_item.sum(-1).sum(-1) / (particle_num ** 2)).mean()
     second_item = (second_item.sum(-1).sum(-1) / (particle_num ** 2)).mean()
     third_item = (third_item.sum(-1).sum(-1) / (particle_num ** 2)).mean()
-    mmd_loss = (first_item - 2 * third_item)
+    mmd_loss = F.relu(first_item + second_item - 2 * third_item)
 
-    rl_loss = mmd_loss + rg_loss * LAMBDA_rg
-    #rl_loss = mmd_loss
+    #rl_loss = torch.sqrt(mmd_loss) + rg_loss * LAMBDA_rg
+    rl_loss = torch.sqrt(mmd_loss)
     rl_optimizer.zero_grad()
     rl_loss.backward()
-    #nn.utils.clip_grad_norm_(eval_model.parameters(), 10)
+    nn.utils.clip_grad_norm_(eval_model.parameters(), 10)
     rl_optimizer.step()
 
     if count % update_freq == 0:
@@ -177,8 +177,8 @@ def aed_train(buffer, eval_model, target_model, gamma, aed_optimizer, aed_model,
     q_particle_value = q_particle_values.gather(1, action.unsqueeze(1).unsqueeze(-1).repeat([1, 1, q_particle_values.size(-1)])).squeeze(1)
     expected_q_particle_value = (reward.unsqueeze(-1) + gamma * (1 - done.unsqueeze(-1)) * next_q_particle_value).detach()
 
-    for p in aed_model.encoder.parameters():
-        p.data.clamp_(-1, 1)
+    #for p in aed_model.encoder.parameters():
+    #    p.data.clamp_(-0.01, 0.01)
 
     encoder_X, decoder_X = aed_model.forward(expected_q_particle_value.unsqueeze(-1).detach())
     encoder_Y, decoder_Y = aed_model.forward(q_particle_value.unsqueeze(-1).detach())
@@ -194,20 +194,20 @@ def aed_train(buffer, eval_model, target_model, gamma, aed_optimizer, aed_model,
     first_item = (first_item.sum(-1).sum(-1) / (particle_num ** 2))
     second_item = (second_item.sum(-1).sum(-1) / (particle_num ** 2))
     third_item = (third_item.sum(-1).sum(-1) / (particle_num ** 2))
-    mmd_loss = (first_item + second_item - 2 * third_item).mean()
+    mmd_loss = F.relu(first_item + second_item - 2 * third_item).mean()
 
-    aed_loss = -mmd_loss + aed_l2_loss * LAMBDA_l2 - rg_loss * LAMBDA_rg
+    aed_loss = -torch.sqrt(mmd_loss) + aed_l2_loss * LAMBDA_l2 - rg_loss * LAMBDA_rg
     #aed_loss = -mmd_loss + aed_l2_loss * 8.
     aed_optimizer.zero_grad()
     aed_loss.backward()
-    #nn.utils.clip_grad_norm_(aed_model.parameters(), 10)
+    nn.utils.clip_grad_norm_(aed_model.parameters(), 10)
     aed_optimizer.step()
 
 
 if __name__ == '__main__':
     gamma = 0.99
     rl_learning_rate = 5e-4
-    aed_learning_rate = 5e-4
+    aed_learning_rate = 5e-6
     batch_size = 64
     capacity = 100000
     exploration = 100
@@ -222,6 +222,7 @@ if __name__ == '__main__':
     seed = 2020
     set_seed(seed)
     env = gym.make('CartPole-v0')
+    #env = env.unwrapped
     env.seed(seed)
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
