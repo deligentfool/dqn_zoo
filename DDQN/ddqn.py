@@ -82,14 +82,14 @@ if __name__ == '__main__':
     gamma = 0.99
     learning_rate = 1e-3
     batch_size = 64
-    soft_update_freq = 100
+    soft_update_freq = 200
     capacity = 10000
-    exploration = 1000
+    exploration = 500
     epsilon_init = 0.9
     epsilon_min = 0.05
     decay = 0.99
     episode = 1000000
-    render = True
+    render = False
 
     env = gym.make('CartPole-v0')
     env = env.unwrapped

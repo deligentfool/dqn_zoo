@@ -291,6 +291,8 @@ if __name__ == '__main__':
         temperature=5.0,
         capacity=50000,
         batch_size=64,
-        h=1
+        h=10,
+        decay=1000,
+        max_episode_length=1000
     )
     test.run()
