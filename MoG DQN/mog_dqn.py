@@ -5,14 +5,22 @@ import numpy as np
 import gym
 import random
 from collections import deque
+import glob
+import shutil
+import os
+
+def export_sources(target_dir):
+    os.makedirs(target_dir)
+    for fn in glob.glob('*'):
+        shutil.copytree(fn, target_dir + fn)
 
 
 def set_seed(seed):
-     torch.manual_seed(seed)
-     torch.cuda.manual_seed_all(seed)
-     np.random.seed(seed)
-     random.seed(seed)
-     torch.backends.cudnn.deterministic = True
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
 
 
 class replay_buffer(object):
@@ -54,6 +62,7 @@ class MDN(nn.Module):
         out = out.view(-1, 3, self.out_features, self.num_gaussians)
         pi = out[:, 0]
         pi = F.softmax(pi, dim=-1)
+        #pi = (pi - pi.max(-1, keepdim=True)[0]).exp() / (pi - pi.max(-1, keepdim=True)[0]).exp().sum(-1, keepdim=True)
         sigma = torch.exp(out[:, 1]) + 0.01
         mu = out[:, 2]
         return pi, sigma, mu
@@ -120,6 +129,7 @@ def train(buffer, target_model, eval_model, gamma, optimizer, batch_size, count,
 
     optimizer.zero_grad()
     jtd_loss.backward()
+    nn.utils.clip_grad_norm_(eval_model.parameters(), 10)
     optimizer.step()
     if count % update_freq == 0:
         target_model.load_state_dict(eval_model.state_dict())
@@ -127,9 +137,9 @@ def train(buffer, target_model, eval_model, gamma, optimizer, batch_size, count,
 
 if __name__ == '__main__':
     gamma = 0.99
-    learning_rate = 3e-4
-    batch_size = 64
-    update_freq = 500
+    learning_rate = 3e-5
+    batch_size = 32
+    update_freq = 200
     capacity = 50000
     exploration = 200
     epsilon_init = 0.5
@@ -137,13 +147,13 @@ if __name__ == '__main__':
     decay = 0.995
     episode = 1000000
     render = False
-    num_gaussians = 11
-    hidden_dim = 256
+    num_gaussians = 5
+    hidden_dim = 128
 
     seed = 2022
     set_seed(seed)
     env = gym.make('CartPole-v0')
-    env = env.unwrapped
+    #env = env.unwrapped
     env.seed(seed)
     observation_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
