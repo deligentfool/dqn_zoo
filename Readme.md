@@ -55,3 +55,11 @@
 * Averaged DQN
 
   [Averaged-DQN: Variance Reduction and Stabilization for Deep Reinforcement Learning](http://arxiv.org/abs/1611.01929)
+
+* MMD DQN
+
+  [MMD DQN: Distributional Reinforcement Learning with Maximum Mean Discrepancy](http://arxiv.org/abs/2007.12354)
+
+* Soft Q-Learning
+
+  [Soft Q-Learning: Reinforcement Learning with Deep Energy-Based Policies](http://arxiv.org/abs/1702.08165)
